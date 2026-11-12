@@ -1,5 +1,12 @@
 {
   "sound": "sound.wav",
   "picture": "posture.png",
-  "message": "Fix your posture!"
+  "message": "Fix your posture!",
+  "debug": false,
+  "camera": 0,
+  "threshold": 30.0,
+  "hysteresis": 6.0,
+  "persist": 5.0,
+  "cooldown": 30.0,
+  "interval": 1.0
 }

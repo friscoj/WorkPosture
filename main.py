@@ -43,60 +43,71 @@ MIN_EAR_ABOVE_SHOULDER_M = 0.02
 MIN_VISIBILITY = 0.5
 
 
+CONFIG_KEYS = (
+    "sound",
+    "picture",
+    "message",
+    "debug",
+    "camera",
+    "threshold",
+    "hysteresis",
+    "persist",
+    "cooldown",
+    "interval",
+)
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Watch a webcam and alert when your head drifts forward of your shoulders."
     )
     parser.add_argument(
         "--debug",
-        action="store_true",
-        help="Show the camera window and print the live angle. Press q to quit.",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Show the camera window and print the live angle. Press q to quit. Overrides config.json.",
     )
-    parser.add_argument("--camera", type=int, default=0, help="Camera index. Default: 0.")
+    parser.add_argument(
+        "--camera",
+        type=int,
+        default=None,
+        help="Camera index. Overrides config.json.",
+    )
     parser.add_argument(
         "--threshold",
         type=float,
-        default=30.0,
+        default=None,
         help=(
             "Forward-head angle, in degrees, that counts as a slouch. "
             "Sit upright with --debug, read the angle, and set this a little above it. "
-            "Default: 30."
+            "Overrides config.json."
         ),
     )
     parser.add_argument(
         "--hysteresis",
         type=float,
-        default=6.0,
-        help="Degrees the angle must fall back under the threshold before the timer resets. Default: 6.",
+        default=None,
+        help="Degrees the angle must fall back under the threshold before the timer resets. Overrides config.json.",
     )
     parser.add_argument(
         "--persist",
         type=float,
-        default=5.0,
-        help="Seconds the slouch must last before an alert. Default: 5.",
+        default=None,
+        help="Seconds the slouch must last before an alert. Overrides config.json.",
     )
     parser.add_argument(
         "--cooldown",
         type=float,
-        default=30.0,
-        help="Minimum seconds between alerts. Default: 30.",
+        default=None,
+        help="Minimum seconds between alerts. Overrides config.json.",
     )
     parser.add_argument(
         "--interval",
         type=float,
-        default=1.0,
-        help="Seconds between samples. Default: 1.",
+        default=None,
+        help="Seconds between samples. Overrides config.json.",
     )
-    args = parser.parse_args()
-    if args.threshold <= 0:
-        parser.error("--threshold must be positive")
-    if not 0 <= args.hysteresis < args.threshold:
-        parser.error("--hysteresis must be at least 0 and less than --threshold")
-    if args.persist < 0 or args.cooldown < 0:
-        parser.error("--persist and --cooldown must be at least 0")
-    if args.interval <= 0:
-        parser.error("--interval must be positive")
-    return args
+    return parser.parse_args()
 
 
 @contextmanager
@@ -134,18 +145,54 @@ def load_config(path):
         raise SystemExit(f"{path} is not valid JSON: {error}") from None
     if not isinstance(data, dict):
         raise SystemExit(f"{path} must contain a JSON object")
-    missing = [key for key in ("sound", "picture", "message") if key not in data]
+    missing = [key for key in CONFIG_KEYS if key not in data]
     if missing:
         raise SystemExit(f"{path} is missing {', '.join(missing)}")
     message = data["message"]
     if not isinstance(message, str):
         raise SystemExit(f"{path} message must be a string")
+    if not isinstance(data["debug"], bool):
+        raise SystemExit(f"{path} debug must be true or false")
     base = path.parent
     return (
         resolve_config_path(base, data["sound"], "sound"),
         resolve_config_path(base, data["picture"], "picture"),
         message,
+        {
+            "debug": data["debug"],
+            "camera": config_number(path, "camera", data["camera"], integer=True),
+            "threshold": config_number(path, "threshold", data["threshold"]),
+            "hysteresis": config_number(path, "hysteresis", data["hysteresis"]),
+            "persist": config_number(path, "persist", data["persist"]),
+            "cooldown": config_number(path, "cooldown", data["cooldown"]),
+            "interval": config_number(path, "interval", data["interval"]),
+        },
     )
+
+
+def config_number(path, key, value, integer=False):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        kind = "an integer" if integer else "a number"
+        raise SystemExit(f"{path} {key} must be {kind}")
+    if integer and isinstance(value, float) and not value.is_integer():
+        raise SystemExit(f"{path} {key} must be an integer")
+    return int(value) if integer else float(value)
+
+
+def apply_settings(args, settings):
+    for key, value in settings.items():
+        if getattr(args, key) is None:
+            setattr(args, key, value)
+    if args.camera < 0:
+        raise SystemExit("camera must be at least 0")
+    if args.threshold <= 0:
+        raise SystemExit("threshold must be positive")
+    if not 0 <= args.hysteresis < args.threshold:
+        raise SystemExit("hysteresis must be at least 0 and less than threshold")
+    if args.persist < 0 or args.cooldown < 0:
+        raise SystemExit("persist and cooldown must be at least 0")
+    if args.interval <= 0:
+        raise SystemExit("interval must be positive")
 
 
 def load_sound(path):
@@ -330,7 +377,8 @@ def main():
             "Download the MediaPipe pose weights (Apache-2.0) with:\n"
             f"curl -L -o {MODEL_PATH.name} {MODEL_URL}"
         )
-    sound_path, picture_path, message = load_config(CONFIG_PATH)
+    sound_path, picture_path, message, settings = load_config(CONFIG_PATH)
+    apply_settings(args, settings)
     samples, sample_rate = load_sound(sound_path)
     options = PoseLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=str(MODEL_PATH)),
