@@ -1,0 +1,2 @@
+mediapipe==1.2.3
+sounddevice==0.5.3
